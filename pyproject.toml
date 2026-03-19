@@ -23,7 +23,9 @@ dependencies = [
   "pydantic>=2.0",
   "AirField>=0.4.0",
   "annotated-types",
+  "rich",
   "starlette",
+  "typer",
 ]
 requires-python = ">= 3.12"
 
@@ -54,8 +56,8 @@ changelog = "https://github.com/feldroy/AirForm/releases"
 documentation = "https://feldroy.github.io/AirForm/"
 homepage = "https://github.com/feldroy/AirForm"
 
-# [project.scripts]
-# airform = "airform.cli:app"
+[project.scripts]
+airform = "airform.cli:app"
 
 [tool.ty]
 # All rules are enabled as "error" by default; no need to specify unless overriding.
