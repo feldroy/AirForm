@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from airform import AirForm, default_form_widget, errors_to_dict, get_user_error_message, pydantic_type_to_html_type
 
-
 # ── Validation tests (from Air) ─────────────────────────────────────
 
 
@@ -238,7 +237,7 @@ def test_render_blank_form() -> None:
 
     html = CheeseForm().render()
     assert '<label for="name">' in html
-    assert '<input' in html
+    assert "<input" in html
     assert 'name="name"' in html
     assert 'name="age"' in html
     assert 'type="number"' in html

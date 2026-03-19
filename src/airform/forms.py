@@ -14,8 +14,6 @@ from html import escape
 from types import UnionType
 from typing import Any, Literal, Self, Union, get_args, get_origin
 
-from starlette.requests import Request
-
 import annotated_types
 from airfield import Autofocus, Label, Widget
 from airfield.types import (
@@ -29,7 +27,7 @@ from airfield.types import (
 )
 from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
-
+from starlette.requests import Request
 
 # ---------------------------------------------------------------------------
 # Metadata helpers
@@ -39,6 +37,12 @@ from pydantic_core import ErrorDetails
 def _meta_dict(field_info) -> dict[type, BasePresentation]:
     """Build a {type: instance} dict for O(1) metadata lookup."""
     return {type(m): m for m in field_info.metadata if isinstance(m, BasePresentation)}
+
+
+def _get_meta[T](meta: dict[type, BasePresentation], cls: type[T]) -> T | None:
+    """Get a typed metadata value from the meta dict, or None."""
+    val = meta.get(cls)
+    return val if isinstance(val, cls) else None
 
 
 def _is_optional(annotation: Any) -> bool:
@@ -62,8 +66,9 @@ def pydantic_type_to_html_type(field_info: Any) -> str:
     """
     meta = _meta_dict(field_info)
 
-    if Widget in meta:
-        return meta[Widget].kind
+    widget = _get_meta(meta, Widget)
+    if widget:
+        return widget.kind
     if Choices in meta:
         return "select"
 
@@ -82,8 +87,9 @@ def pydantic_type_to_html_type(field_info: Any) -> str:
 
 def _get_options(annotation: Any, meta: dict[type, BasePresentation]) -> list[tuple[str, str]]:
     """Get select/dropdown options from metadata or type."""
-    if Choices in meta:
-        return [(str(v), lbl) for v, lbl in meta[Choices].options]
+    choices = _get_meta(meta, Choices)
+    if choices:
+        return [(str(v), lbl) for v, lbl in choices.options]
     if isinstance(annotation, type) and issubclass(annotation, Enum):
         return [(m.value, m.name.replace("_", " ").title()) for m in annotation]
     if get_origin(annotation) is Literal:
@@ -193,9 +199,11 @@ def default_form_widget(
         # Skip primary keys and fields hidden in form context
         if PrimaryKey in meta:
             continue
-        if Hidden in meta and meta[Hidden].in_context("form"):
+        hidden = _get_meta(meta, Hidden)
+        if hidden and hidden.in_context("form"):
             continue
-        if ReadOnly in meta and meta[ReadOnly].in_context("form"):
+        readonly = _get_meta(meta, ReadOnly)
+        if readonly and readonly.in_context("form"):
             continue
 
         input_type = pydantic_type_to_html_type(field_info)
@@ -226,8 +234,9 @@ def default_form_widget(
         if Autofocus in meta:
             input_attrs["autofocus"] = ""
 
-        if Placeholder in meta:
-            input_attrs["placeholder"] = meta[Placeholder].text
+        placeholder = _get_meta(meta, Placeholder)
+        if placeholder:
+            input_attrs["placeholder"] = placeholder.text
 
         if has_error:
             input_attrs["aria-invalid"] = "true"
@@ -262,9 +271,7 @@ def default_form_widget(
             parts.append('    <option value="">-- Select --</option>')
             for opt_val, opt_label in options:
                 sel = " selected" if value is not None and str(value) == opt_val else ""
-                parts.append(
-                    f'    <option value="{escape(opt_val)}"{sel}>{escape(opt_label)}</option>'
-                )
+                parts.append(f'    <option value="{escape(opt_val)}"{sel}>{escape(opt_label)}</option>')
             parts.append("  </select>")
 
         else:
@@ -275,11 +282,9 @@ def default_form_widget(
             parts.append(label_html)
 
         # Help text
-        if HelpText in meta:
-            parts.append(
-                f'  <div class="air-field-help" id="{escape(field_name)}-help">'
-                f"{escape(meta[HelpText].text)}</div>"
-            )
+        help_text = _get_meta(meta, HelpText)
+        if help_text:
+            parts.append(f'  <div class="air-field-help" id="{escape(field_name)}-help">{escape(help_text.text)}</div>')
 
         # Error message
         if error:
