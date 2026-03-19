@@ -23,6 +23,7 @@ dependencies = [
   "pydantic>=2.0",
   "AirField>=0.4.0",
   "annotated-types",
+  "starlette",
 ]
 requires-python = ">= 3.12"
 
