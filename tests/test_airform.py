@@ -609,7 +609,9 @@ def test_csrf_token_not_on_validated_data() -> None:
 
     form = BraceletForm()
     html = form.render()
-    token = re.search(r'value="([^"]+)"', html).group(1)
+    match = re.search(r'value="([^"]+)"', html)
+    assert match
+    token = match.group(1)
 
     form.validate({"bead_count": "12", "pattern": "gradient", "csrf_token": token})
     assert form.is_valid

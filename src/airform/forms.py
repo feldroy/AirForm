@@ -319,7 +319,7 @@ def _build_csrf_model(model: type[BaseModel]) -> type[BaseModel]:
     # Annotated type with AirField CsrfToken metadata
     csrf_annotation = Annotated[ValidCsrfToken, CsrfTokenMeta()]
 
-    return create_model(
+    return create_model(  # type: ignore[call-overload]
         f"_{model.__name__}WithCsrf",
         __base__=model,
         **{CSRF_FIELD_NAME: (csrf_annotation, ...)},
@@ -441,7 +441,6 @@ class AirForm[M: BaseModel]:
         Returns:
             True if validation succeeds, False otherwise.
         """
-        from airform.csrf import CSRF_FIELD_NAME
 
         self._data = None
         self.is_valid = False
