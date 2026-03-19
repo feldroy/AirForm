@@ -20,8 +20,9 @@ classifiers = [
 ]
 license = {text = "MIT"}
 dependencies = [
-  "typer",
-  "rich",
+  "pydantic>=2.0",
+  "AirField>=0.4.0",
+  "annotated-types",
 ]
 requires-python = ">= 3.12"
 
@@ -52,8 +53,8 @@ changelog = "https://github.com/feldroy/AirForm/releases"
 documentation = "https://feldroy.github.io/AirForm/"
 homepage = "https://github.com/feldroy/AirForm"
 
-[project.scripts]
-airform = "airform.cli:app"
+# [project.scripts]
+# airform = "airform.cli:app"
 
 [tool.ty]
 # All rules are enabled as "error" by default; no need to specify unless overriding.
@@ -96,3 +97,7 @@ exclude_also = [
 [tool.uv]
 package = true
 default-groups = ["dev"]
+
+[tool.uv.sources]
+AirField = { path = "../AirField", editable = true }
+AirModel = { path = "../AirModel", editable = true }
