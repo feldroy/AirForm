@@ -15,6 +15,10 @@ import hmac
 import os
 import secrets
 import time
+from typing import Any
+
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
 
 #: Secret key for signing CSRF tokens. Auto-generated per process,
 #: or read from AIRFORM_SECRET env var for multi-worker deployments.
@@ -36,34 +40,61 @@ def generate_csrf_token() -> str:
     return f"{payload}:{sig}"
 
 
-def validate_csrf_token(token: str | None, *, max_age: int = CSRF_MAX_AGE) -> str | None:
-    """Validate a CSRF token. Returns an error message, or None if valid."""
-    if not token:
-        return "Missing CSRF token."
-
+def _check_csrf_token(token: str, max_age: int = CSRF_MAX_AGE) -> str:
+    """Validate a CSRF token string. Returns the token if valid, raises ValueError if not."""
     parts = token.split(":")
     if len(parts) != 3:
-        return "Invalid CSRF token."
+        msg = "Invalid CSRF token."
+        raise ValueError(msg)
 
     timestamp_str, nonce, sig = parts
 
     expected_payload = f"{timestamp_str}:{nonce}"
     expected_sig = hmac.new(_SECRET, expected_payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected_sig, sig):
-        return "Invalid CSRF token."
+        msg = "Invalid CSRF token."
+        raise ValueError(msg)
 
     try:
         token_time = int(timestamp_str)
     except ValueError:
-        return "Invalid CSRF token."
+        msg = "Invalid CSRF token."
+        raise
 
     if time.time() - token_time > max_age:
-        return "CSRF token has expired. Please resubmit the form."
+        msg = "CSRF token has expired. Please resubmit the form."
+        raise ValueError(msg)
 
-    return None
+    return token
 
 
-def csrf_hidden_input() -> str:
-    """Render a hidden input with a fresh CSRF token."""
+class ValidCsrfToken(str):
+    """A Pydantic-native string type that validates CSRF token signatures.
+
+    Used on the wrapper model that AirForm creates automatically.
+    Pydantic validates it alongside all other fields, so CSRF errors
+    appear in form.errors through the same machinery.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        return core_schema.no_info_plain_validator_function(cls._validate)
+
+    @classmethod
+    def _validate(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            msg = "CSRF token must be a string."
+            raise ValueError(msg)
+        return _check_csrf_token(value)
+
+
+def csrf_hidden_input() -> tuple[str, str]:
+    """Render a hidden input with a fresh CSRF token.
+
+    Returns:
+        A (html, token) tuple. The html is the hidden input element,
+        the token is the raw value for storing on the form instance.
+    """
     token = generate_csrf_token()
-    return f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{token}">'
+    html = f'<input type="hidden" name="{CSRF_FIELD_NAME}" value="{token}">'
+    return html, token

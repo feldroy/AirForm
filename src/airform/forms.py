@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from enum import Enum
 from html import escape
 from types import UnionType
-from typing import Any, Literal, Self, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Self, Union, get_args, get_origin
 
 import annotated_types
 from airfield import Autofocus, Label, Widget
@@ -25,7 +25,7 @@ from airfield.types import (
     PrimaryKey,
     ReadOnly,
 )
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, create_model
 from pydantic_core import ErrorDetails
 from starlette.requests import Request
 
@@ -186,10 +186,8 @@ def default_form_widget(
     Returns:
         HTML string with all form fields.
     """
-    from airform.csrf import csrf_hidden_input
-
     error_dict = errors_to_dict(errors)
-    field_parts: list[str] = [csrf_hidden_input()]
+    field_parts: list[str] = []
 
     for field_name, field_info in model.model_fields.items():
         if includes is not None and field_name not in includes:
@@ -306,11 +304,39 @@ def default_form_widget(
 # ---------------------------------------------------------------------------
 
 
+def _build_csrf_model(model: type[BaseModel]) -> type[BaseModel]:
+    """Create a wrapper model that adds a csrf_token field.
+
+    The wrapper inherits from the user's model and adds a
+    csrf_token field validated by the ValidCsrfToken Pydantic type.
+    The CsrfToken metadata type from AirField marks it so renderers
+    know to skip it in user-facing layouts.
+    """
+    from airfield.types import CsrfToken as CsrfTokenMeta
+
+    from airform.csrf import CSRF_FIELD_NAME, ValidCsrfToken
+
+    # Annotated type with AirField CsrfToken metadata
+    csrf_annotation = Annotated[ValidCsrfToken, CsrfTokenMeta()]
+
+    return create_model(
+        f"_{model.__name__}WithCsrf",
+        __base__=model,
+        **{CSRF_FIELD_NAME: (csrf_annotation, ...)},
+    )
+
+
 class AirForm[M: BaseModel]:
     """A form handler that validates and renders Pydantic models as HTML.
 
     Daniel's original pattern: the form knows its model, validates
     from a dict, and renders itself through a swappable widget.
+
+    CSRF protection is automatic. When render() is called, a signed
+    token is embedded as a hidden field. When validate() runs after
+    render(), Pydantic validates the token alongside all other fields
+    using a wrapper model. If validate() is called directly without
+    render() (programmatic use, tests), CSRF is skipped.
 
     Example::
 
@@ -329,12 +355,8 @@ class AirForm[M: BaseModel]:
         if form.is_valid:
             print(form.data.name)
 
-        # Render a blank form
+        # Render a blank form (includes CSRF token automatically)
         html = CheeseForm().render()
-
-        # Render with errors after failed validation
-        form.validate({})
-        html = form.render()
 
         # Swap the widget for custom rendering
         class CustomCheeseForm(AirForm[CheeseModel]):
@@ -342,6 +364,7 @@ class AirForm[M: BaseModel]:
     """
 
     model: type[M] | None = None
+    _csrf_model: type[BaseModel] | None = None
     _data: M | None = None
     initial_data: dict | None = None
     errors: list[ErrorDetails] | None = None
@@ -357,6 +380,9 @@ class AirForm[M: BaseModel]:
                     if args and isinstance(args[0], type) and issubclass(args[0], BaseModel):
                         cls.model = args[0]
                         break
+        # Build the CSRF wrapper model once at class definition time
+        if cls.model is not None:
+            cls._csrf_model = _build_csrf_model(cls.model)
 
     def __init__(self, initial_data: dict | None = None) -> None:
         if self.model is None:
@@ -364,6 +390,7 @@ class AirForm[M: BaseModel]:
             raise NotImplementedError(msg)
         self.initial_data = initial_data
         self.submitted_data: dict | None = None
+        self._csrf_token: str | None = None
 
     @property
     def data(self) -> M:
@@ -385,6 +412,8 @@ class AirForm[M: BaseModel]:
     async def from_request(cls, request: Request) -> Self:
         """Create and validate an AirForm instance from a request.
 
+        CSRF is always enforced for browser submissions.
+
         Args:
             request: An object with an async ``form()`` method.
 
@@ -393,15 +422,18 @@ class AirForm[M: BaseModel]:
         """
         form_data = await request.form()
         self = cls()
+        # A browser submission came from a rendered form, enforce CSRF
+        self._csrf_token = "from_request"
         self.validate(dict(form_data))
         return self
 
     def validate(self, form_data: dict[Any, Any]) -> bool:
         """Validate form data against the model.
 
-        Checks the CSRF token first (if present), then validates
-        with Pydantic. The CSRF field is stripped before Pydantic
-        sees the data.
+        If render() was called first, Pydantic validates the CSRF
+        token as a regular field on a wrapper model. If validate()
+        is called directly (programmatic use, tests), CSRF is
+        skipped and the original model is used.
 
         Args:
             form_data: Dictionary containing the form fields to validate.
@@ -409,23 +441,29 @@ class AirForm[M: BaseModel]:
         Returns:
             True if validation succeeds, False otherwise.
         """
-        from airform.csrf import CSRF_FIELD_NAME, validate_csrf_token
+        from airform.csrf import CSRF_FIELD_NAME
 
         self._data = None
         self.is_valid = False
         self.errors = None
         self.submitted_data = dict(form_data) if hasattr(form_data, "items") else form_data
 
-        # Check CSRF token and strip it before Pydantic validation
-        clean_data = {k: v for k, v in self.submitted_data.items() if k != CSRF_FIELD_NAME}
-        csrf_error = validate_csrf_token(self.submitted_data.get(CSRF_FIELD_NAME))
-        if csrf_error:
-            self.errors = [{"type": "csrf_error", "loc": ("__csrf__",), "msg": csrf_error}]
-            return self.is_valid
+        # Use the CSRF wrapper model if render() was called, otherwise the plain model
+        if self._csrf_token is not None and self._csrf_model is not None:
+            validation_model = self._csrf_model
+        else:
+            validation_model = self.model
 
         try:
-            assert self.model is not None
-            self._data = self.model(**clean_data)
+            assert validation_model is not None
+            result = validation_model(**self.submitted_data)
+            # If we used the wrapper, extract the original model's data
+            if validation_model is not self.model:
+                assert self.model is not None
+                original_fields = {k: getattr(result, k) for k in self.model.model_fields}
+                self._data = self.model.model_construct(**original_fields)
+            else:
+                self._data = result  # type: ignore[assignment]
             self.is_valid = True
         except ValidationError as e:
             self.errors = e.errors()
@@ -442,13 +480,18 @@ class AirForm[M: BaseModel]:
     def render(self) -> str:
         """Render the form as HTML using the widget.
 
+        Automatically embeds a signed CSRF token as a hidden field.
         Uses submitted data if available (preserves values after
         validation errors), falls back to initial_data.
         """
+        from airform.csrf import csrf_hidden_input
+
+        csrf_html, self._csrf_token = csrf_hidden_input()
         render_data = self.submitted_data or self.initial_data
-        return self.widget(
+        fields_html = self.widget(
             model=self.model,
             data=render_data,
             errors=self.errors,
             includes=self.includes,
         )
+        return f"{csrf_html}\n{fields_html}"

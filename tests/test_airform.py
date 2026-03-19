@@ -13,12 +13,6 @@ from airfield import AirField
 from pydantic import BaseModel, Field
 
 from airform import AirForm, default_form_widget, errors_to_dict, get_user_error_message, pydantic_type_to_html_type
-from airform.csrf import generate_csrf_token
-
-
-def _csrf() -> dict[str, str]:
-    """Return a dict with a valid CSRF token for test submissions."""
-    return {"csrf_token": generate_csrf_token()}
 
 # ── Validation tests (from Air) ─────────────────────────────────────
 
@@ -32,7 +26,7 @@ def test_form_sync_check() -> None:
         model = CheeseModel
 
     cheese = CheeseForm()
-    cheese.validate({"name": "Parmesan", "age": "Hello", **_csrf()})
+    cheese.validate({"name": "Parmesan", "age": "Hello"})
     assert cheese.is_valid is False
     assert cheese.errors == [
         {
@@ -61,11 +55,11 @@ def test_airform_validate() -> None:
 
     form = KareKareForm()
     assert not form.is_valid
-    form.validate({**_csrf()})
+    form.validate({})
     assert not form.is_valid
-    form.validate({"name": "Kare-Kare", **_csrf()})
+    form.validate({"name": "Kare-Kare"})
     assert not form.is_valid
-    form.validate({"name": "Kare-Kare", "servings": 4, **_csrf()})
+    form.validate({"name": "Kare-Kare", "servings": 4})
     assert form.is_valid
     assert form.errors is None
 
@@ -79,7 +73,7 @@ def test_airform_generic_validates() -> None:
         pass
 
     form = AutoForm()
-    form.validate({"name": "Test", "age": 3, **_csrf()})
+    form.validate({"name": "Test", "age": 3})
     assert form.is_valid is True
 
 
@@ -95,7 +89,7 @@ def test_airform_generic_type_parameter() -> None:
     assert JeepneyRouteForm.model is JeepneyRouteModel
 
     form = JeepneyRouteForm()
-    form.validate({"route_name": "01C", "origin": "Antipolo", "destination": "Cubao", **_csrf()})
+    form.validate({"route_name": "01C", "origin": "Antipolo", "destination": "Cubao"})
     assert form.is_valid
     assert form.data.route_name == "01C"
     assert isinstance(form.data, JeepneyRouteModel)
@@ -149,11 +143,11 @@ def test_airform_revalidation_resets_state() -> None:
         pass
 
     form = SariSariForm()
-    form.validate({"item": "Chicharon", "price": 25, **_csrf()})
+    form.validate({"item": "Chicharon", "price": 25})
     assert form.is_valid
     assert form.data.item == "Chicharon"
 
-    form.validate({**_csrf()})
+    form.validate({})
     assert not form.is_valid
     with pytest.raises(AttributeError, match="No validated data"):
         form.data  # noqa: B018
@@ -172,7 +166,7 @@ def test_airform_multi_level_inheritance() -> None:
 
     assert SpecificBarangayForm.model is BarangayModel
     form = SpecificBarangayForm()
-    form.validate({"name": "San Antonio", "captain": "Kap. Reyes", **_csrf()})
+    form.validate({"name": "San Antonio", "captain": "Kap. Reyes"})
     assert form.is_valid
     assert form.data.captain == "Kap. Reyes"
 
@@ -186,7 +180,7 @@ def test_airform_generic_data_access() -> None:
         pass
 
     form = PalengkeForm()
-    form.validate({"vendor": "Aling Nena", "stall_number": 42, **_csrf()})
+    form.validate({"vendor": "Aling Nena", "stall_number": 42})
     assert form.is_valid
     assert form.data.vendor == "Aling Nena"
     assert form.data.stall_number == 42
@@ -272,7 +266,7 @@ def test_render_preserves_submitted_data_on_error() -> None:
         pass
 
     form = CheeseForm()
-    form.validate({"name": "Brie", "age": "not-a-number", **_csrf()})
+    form.validate({"name": "Brie", "age": "not-a-number"})
     assert not form.is_valid
     html = form.render()
     assert 'value="Brie"' in html
@@ -290,7 +284,7 @@ def test_render_with_errors_shows_messages() -> None:
         pass
 
     form = CheeseForm()
-    form.validate({**_csrf()})
+    form.validate({})
     html = form.render()
     assert "This field is required." in html
 
@@ -509,10 +503,11 @@ def test_custom_widget_swap() -> None:
         widget = staticmethod(tavern_widget)
 
     html = CompanionForm().render()
-    assert html == "<p>Fill this out or the barkeep gets cross.</p>"
+    assert "<p>Fill this out or the barkeep gets cross.</p>" in html
+    assert 'name="csrf_token"' in html  # CSRF token still included
 
 
-# ── CSRF tests ───────────────────────────────────────────────────────
+# ── CSRF tests (polymer clay jewelry making) ────────────────────────
 
 
 def test_render_includes_csrf_token() -> None:
@@ -530,8 +525,8 @@ def test_render_includes_csrf_token() -> None:
     assert 'name="csrf_token"' in html
 
 
-def test_validate_checks_csrf_token() -> None:
-    """Validation fails if no CSRF token is submitted."""
+def test_validate_without_render_skips_csrf() -> None:
+    """Direct validate() without render() skips CSRF (programmatic use)."""
 
     class EarringModel(BaseModel):
         clay_color: str
@@ -541,14 +536,13 @@ def test_validate_checks_csrf_token() -> None:
 
     form = EarringForm()
     form.validate({"clay_color": "terracotta"})
-    assert not form.is_valid
-    assert form.errors is not None
-    assert form.errors[0]["type"] == "csrf_error"
+    assert form.is_valid
+    assert form.data.clay_color == "terracotta"
 
 
-def test_validate_accepts_valid_csrf_token() -> None:
-    """Validation passes with a valid CSRF token."""
-    from airform.csrf import generate_csrf_token
+def test_render_then_validate_enforces_csrf() -> None:
+    """After render(), validate() requires a valid CSRF token."""
+    import re
 
     class EarringModel(BaseModel):
         clay_color: str
@@ -558,18 +552,22 @@ def test_validate_accepts_valid_csrf_token() -> None:
         pass
 
     form = EarringForm()
-    form.validate({
-        "clay_color": "sage green",
-        "shape": "arch",
-        "csrf_token": generate_csrf_token(),
-    })
+    html = form.render()
+
+    # Extract the token from the rendered HTML
+    match = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    assert match
+    token = match.group(1)
+
+    # Submit with the rendered token
+    form.validate({"clay_color": "sage green", "shape": "arch", "csrf_token": token})
     assert form.is_valid
     assert form.data.clay_color == "sage green"
     assert form.data.shape == "arch"
 
 
-def test_validate_rejects_bad_csrf_token() -> None:
-    """Validation fails with a tampered CSRF token."""
+def test_render_then_validate_rejects_missing_csrf() -> None:
+    """After render(), submitting without a CSRF token fails."""
 
     class PendantModel(BaseModel):
         design: str
@@ -578,17 +576,29 @@ def test_validate_rejects_bad_csrf_token() -> None:
         pass
 
     form = PendantForm()
-    form.validate({
-        "design": "botanical press",
-        "csrf_token": "fake:token:value",
-    })
+    form.render()  # sets _csrf_token
+    form.validate({"design": "botanical press"})
     assert not form.is_valid
-    assert form.errors[0]["type"] == "csrf_error"
 
 
-def test_csrf_token_stripped_from_model_data() -> None:
-    """The CSRF field doesn't leak into the validated model."""
-    from airform.csrf import generate_csrf_token
+def test_render_then_validate_rejects_bad_csrf() -> None:
+    """After render(), a tampered CSRF token fails validation."""
+
+    class PendantModel(BaseModel):
+        design: str
+
+    class PendantForm(AirForm[PendantModel]):
+        pass
+
+    form = PendantForm()
+    form.render()
+    form.validate({"design": "botanical press", "csrf_token": "fake:token:value"})
+    assert not form.is_valid
+
+
+def test_csrf_token_not_on_validated_data() -> None:
+    """The CSRF field doesn't leak into form.data."""
+    import re
 
     class BraceletModel(BaseModel):
         bead_count: int
@@ -598,11 +608,32 @@ def test_csrf_token_stripped_from_model_data() -> None:
         pass
 
     form = BraceletForm()
-    form.validate({
-        "bead_count": "12",
-        "pattern": "gradient",
-        "csrf_token": generate_csrf_token(),
-    })
+    html = form.render()
+    token = re.search(r'value="([^"]+)"', html).group(1)
+
+    form.validate({"bead_count": "12", "pattern": "gradient", "csrf_token": token})
     assert form.is_valid
     assert form.data.bead_count == 12
     assert not hasattr(form.data, "csrf_token")
+
+
+def test_csrf_token_excluded_from_field_rendering() -> None:
+    """The CSRF token is a hidden input, not a visible form field."""
+
+    class RingModel(BaseModel):
+        band_width: str = AirField(label="Band Width")
+        stone: str = AirField(label="Stone Type")
+
+    class RingForm(AirForm[RingModel]):
+        pass
+
+    html = RingForm().render()
+    # CSRF token rendered as hidden input
+    assert 'name="csrf_token"' in html
+    assert 'type="hidden"' in html
+    # Not rendered as a labeled field with air-field wrapper
+    assert '<label for="csrf_token">' not in html
+    assert 'class="air-field"' not in html.split('name="csrf_token"')[0]
+    # User fields are rendered normally
+    assert "Band Width" in html
+    assert "Stone Type" in html
