@@ -186,8 +186,10 @@ def default_form_widget(
     Returns:
         HTML string with all form fields.
     """
+    from airform.csrf import csrf_hidden_input
+
     error_dict = errors_to_dict(errors)
-    field_parts: list[str] = []
+    field_parts: list[str] = [csrf_hidden_input()]
 
     for field_name, field_info in model.model_fields.items():
         if includes is not None and field_name not in includes:
@@ -397,19 +399,33 @@ class AirForm[M: BaseModel]:
     def validate(self, form_data: dict[Any, Any]) -> bool:
         """Validate form data against the model.
 
+        Checks the CSRF token first (if present), then validates
+        with Pydantic. The CSRF field is stripped before Pydantic
+        sees the data.
+
         Args:
             form_data: Dictionary containing the form fields to validate.
 
         Returns:
             True if validation succeeds, False otherwise.
         """
+        from airform.csrf import CSRF_FIELD_NAME, validate_csrf_token
+
         self._data = None
         self.is_valid = False
         self.errors = None
         self.submitted_data = dict(form_data) if hasattr(form_data, "items") else form_data
+
+        # Check CSRF token and strip it before Pydantic validation
+        clean_data = {k: v for k, v in self.submitted_data.items() if k != CSRF_FIELD_NAME}
+        csrf_error = validate_csrf_token(self.submitted_data.get(CSRF_FIELD_NAME))
+        if csrf_error:
+            self.errors = [{"type": "csrf_error", "loc": ("__csrf__",), "msg": csrf_error}]
+            return self.is_valid
+
         try:
             assert self.model is not None
-            self._data = self.model(**form_data)
+            self._data = self.model(**clean_data)
             self.is_valid = True
         except ValidationError as e:
             self.errors = e.errors()
