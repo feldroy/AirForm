@@ -8,7 +8,7 @@ pydantic-type-to-HTML-type mapping. Extended here to read the full
 AirField metadata vocabulary.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from enum import Enum
 from html import escape
 from types import UnionType
@@ -404,7 +404,7 @@ class AirForm[M: BaseModel]:
             raise AttributeError(msg)
         return self._data
 
-    async def __call__(self, form_data: dict[Any, Any]) -> Self:
+    async def __call__(self, form_data: Mapping[str, Any]) -> Self:
         self.validate(form_data)
         return self
 
@@ -427,7 +427,7 @@ class AirForm[M: BaseModel]:
         self.validate(dict(form_data))
         return self
 
-    def validate(self, form_data: dict[Any, Any]) -> bool:
+    def validate(self, form_data: Mapping[str, Any]) -> bool:
         """Validate form data against the model.
 
         If render() was called first, Pydantic validates the CSRF

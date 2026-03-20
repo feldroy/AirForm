@@ -64,6 +64,24 @@ def test_airform_validate() -> None:
     assert form.errors is None
 
 
+def test_airform_validate_accepts_mapping() -> None:
+    """validate() accepts any Mapping, not just dict (e.g. Starlette FormData)."""
+    from starlette.datastructures import FormData
+
+    class KareKareModel(BaseModel):
+        name: str
+        servings: int
+
+    class KareKareForm(AirForm):
+        model = KareKareModel
+
+    form = KareKareForm()
+    form_data = FormData({"name": "Kare-Kare", "servings": "4"})
+    form.validate(form_data)
+    assert form.is_valid
+    assert form.data.name == "Kare-Kare"
+
+
 def test_airform_generic_validates() -> None:
     class AutoModel(BaseModel):
         name: str
