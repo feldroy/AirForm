@@ -525,6 +525,56 @@ def test_custom_widget_swap() -> None:
     assert 'name="csrf_token"' in html  # CSRF token still included
 
 
+# ── Empty string vs. too-short error message tests (pottery/ceramics) ──
+
+
+@pytest.mark.parametrize(
+    ('input_value', 'expected_message'),
+    [
+        pytest.param('', 'This field is required.', id='empty-string-means-required'),
+        pytest.param('a', 'This value is too short.', id='too-short-stays-too-short'),
+    ],
+)
+def test_get_user_error_message_string_too_short(input_value: str, expected_message: str) -> None:
+    """Empty string + string_too_short should say 'required', not 'too short'."""
+    error = {
+        'type': 'string_too_short',
+        'loc': ('glaze_name',),
+        'msg': 'String should have at least 2 characters',
+        'input': input_value,
+        'ctx': {'min_length': 2},
+    }
+    assert get_user_error_message(error) == expected_message
+
+
+def test_get_user_error_message_missing_field() -> None:
+    """A completely missing field still says 'required' (existing behavior)."""
+    error = {
+        'type': 'missing',
+        'loc': ('kiln_temp',),
+        'msg': 'Field required',
+        'input': {},
+    }
+    assert get_user_error_message(error) == 'This field is required.'
+
+
+def test_render_empty_string_min_length_shows_required() -> None:
+    """Submitting an empty string to a min_length field should render 'required' message."""
+
+    class StonewareModel(BaseModel):
+        glaze_name: str = AirField(min_length=2)
+
+    class StonewareForm(AirForm[StonewareModel]):
+        pass
+
+    form = StonewareForm()
+    form.validate({'glaze_name': ''})
+    assert not form.is_valid
+    html = form.render()
+    assert 'This field is required.' in html
+    assert 'This value is too short.' not in html
+
+
 # ── CSRF tests (polymer clay jewelry making) ────────────────────────
 
 

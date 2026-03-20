@@ -112,7 +112,7 @@ def get_user_error_message(error: dict) -> str:
         "int_parsing": "Please enter a valid number.",
         "float_parsing": "Please enter a valid number.",
         "bool_parsing": "Please select a valid option.",
-        "string_too_short": "This value is too short.",
+        "string_too_short": "This field is required." if error.get("input") == "" else "This value is too short.",
         "string_too_long": "This value is too long.",
         "value_error": "This value is not valid.",
         "type_error": "Please enter the correct type of value.",
