@@ -4,8 +4,9 @@
 # ///
 """Pottery workshop registration form built from AGENTS.md documentation alone."""
 
-from pydantic import BaseModel
 from airfield import AirField
+from pydantic import BaseModel
+
 from airform import AirForm
 
 
@@ -85,7 +86,7 @@ bad_form = PotteryForm()
 bad_form.validate(bad_data)
 assert not bad_form.is_valid, "Expected invalid"
 print("Errors:")
-for error in bad_form.errors:
+for error in bad_form.errors or []:
     print(f"  - {error}")
 
 
