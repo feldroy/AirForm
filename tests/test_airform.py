@@ -730,7 +730,6 @@ def test_render_returns_safe_html() -> None:
 
 def test_safe_html_preserves_content() -> None:
     """SafeHTML behaves like a str for all practical purposes."""
-    from airform import SafeHTML
 
     class GlazeModel(BaseModel):
         color: str = AirField(label="Glaze Color")
