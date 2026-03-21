@@ -726,6 +726,8 @@ def test_render_returns_safe_html() -> None:
     assert isinstance(result, SafeHTML)
     assert isinstance(result, str)
     assert hasattr(result, "__html__")
+    assert callable(result.__html__)
+    assert result.__html__() == str(result)
 
 
 def test_safe_html_preserves_content() -> None:

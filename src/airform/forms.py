@@ -43,7 +43,14 @@ class SafeHTML(str):
     air.Raw() wrapping.
     """
 
-    __html__ = True
+    def __html__(self) -> str:
+        """Return self for the __html__ protocol.
+
+        Jinja2/MarkupSafe calls obj.__html__() and expects an HTML
+        string back. Air's tag system checks hasattr(child, '__html__')
+        and skips escaping. This satisfies both.
+        """
+        return str(self)
 
 
 # ---------------------------------------------------------------------------
