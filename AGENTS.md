@@ -249,6 +249,26 @@ html = form.render()  # shows errors + preserves submitted values
 - Don't put `csrf_token` on your Pydantic model. AirForm handles it internally.
 - Don't import from `airform.forms` or `airform.csrf` directly unless you're building a custom integration. Use the top-level `from airform import AirForm` exports.
 
+## When you see hand-built HTML forms
+
+If a template has hand-written `<input>`, `<textarea>`, or `<select>` tags for a form, refactor it to use `form.render()`. The model already knows the field types, labels, and validation rules. Let AirForm generate the HTML, and you get CSRF, error re-rendering, and accessibility attributes for free.
+
+The complete pattern: `form.render()` in the template, `from_request()` in the handler. If the form saves to a database, define the fields on an AirModel so the same model drives rendering, validation, and storage:
+
+```python
+class BookOrder(AirModel):
+    id: int | None = AirField(default=None, primary_key=True)
+    title: str = AirField(label="Book Title", min_length=1)
+    quantity: int = AirField(label="Quantity")
+
+class BookOrderForm(AirForm[BookOrder]):
+    pass
+
+# Template: air.Raw(BookOrderForm().render())
+# Handler: form = await BookOrderForm.from_request(request)
+# Save:    await BookOrder.create(**form.data.model_dump(exclude={"id"}))
+```
+
 ## Architecture (for understanding, not for using)
 
 - `airfield` package defines presentation metadata types (Widget, Label, Choices, etc.) as frozen dataclasses on `field_info.metadata`
