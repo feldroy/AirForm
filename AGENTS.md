@@ -2,40 +2,67 @@
 
 You are working with AirForm, a Python library that turns Pydantic models into validated, rendered HTML forms. It reads presentation metadata from AirField and produces accessible HTML with zero configuration.
 
-## The mental model
+Most Air forms save to the database through AirModel. Some forms do something else (send an email, trigger an API call, run a search). AirForm handles both.
 
-There are three things: a **model** (your data), a **form class** (the bridge), and **two operations** (validate and render).
+## Database-backed forms (most common)
+
+The typical case: the form fields match a database model. Use AirModel directly.
+
+```python
+from airmodel import AirModel, AirField
+from airform import AirForm
+
+class BookOrder(AirModel):
+    id: int | None = AirField(default=None, primary_key=True)
+    title: str = AirField(label="Book Title", min_length=1)
+    quantity: int = AirField(label="Quantity", help_text="How many copies?")
+    gift_wrap: bool = AirField(default=False, label="Gift wrap")
+
+class BookOrderForm(AirForm[BookOrder]):
+    pass
+
+# Validate and save
+form = BookOrderForm()
+form.validate({"title": "Everyone Dies", "quantity": "3"})
+if form.is_valid:
+    await BookOrder.create(
+        title=form.data.title,
+        quantity=form.data.quantity,
+        gift_wrap=form.data.gift_wrap,
+    )
+
+# Render a blank form
+html = BookOrderForm().render()
+```
+
+The `id` field is skipped in the form because it has `primary_key=True`.
+
+## Plain forms (no database)
+
+For forms that don't save to a database, use a plain Pydantic `BaseModel`. Contact forms, search forms, login forms, feedback forms.
 
 ```python
 from pydantic import BaseModel
 from airfield import AirField
 from airform import AirForm
 
-# 1. Define your data as a Pydantic model with AirField metadata
-class BookOrder(BaseModel):
-    title: str = AirField(label="Book Title", min_length=1)
-    quantity: int = AirField(label="Quantity", help_text="How many copies?")
-    gift_wrap: bool = AirField(default=False, label="Gift wrap")
+class ContactMessage(BaseModel):
+    name: str = AirField(label="Your Name", autofocus=True)
+    email: str = AirField(type="email", label="Email")
+    message: str = AirField(widget="textarea", label="Message")
 
-# 2. Create a form class (one line)
-class BookOrderForm(AirForm[BookOrder]):
+class ContactForm(AirForm[ContactMessage]):
     pass
 
-# 3a. Validate
-form = BookOrderForm()
-form.validate({"title": "Everyone Dies", "quantity": "3"})
+form = ContactForm()
+form.validate({"name": "Audrey", "email": "audreyfeldroy@example.com", "message": "Hello!"})
 if form.is_valid:
-    print(form.data.title)  # "Everyone Dies" — typed as str
-
-# 3b. Render
-html = BookOrderForm().render()  # complete HTML with labels, inputs, CSRF token
+    send_email(form.data.name, form.data.email, form.data.message)
 ```
-
-That's the whole API.
 
 ## What AirField metadata does
 
-AirField wraps `pydantic.Field` and adds presentation metadata that AirForm reads when rendering. You don't have to use AirField, plain `str` and `int` annotations work, but AirField gives you control over how fields appear:
+AirField wraps `pydantic.Field` and adds presentation metadata that AirForm reads when rendering:
 
 | AirField parameter | What it does in the rendered HTML |
 |---|---|
@@ -50,6 +77,57 @@ AirField wraps `pydantic.Field` and adds presentation metadata that AirForm read
 | `min_length=N` | `minlength="N"` HTML5 attribute |
 | `max_length=N` | `maxlength="N"` HTML5 attribute |
 
+## Async: from_request()
+
+The typical web handler pattern with AirModel:
+
+```python
+import air
+from airmodel import AirModel, AirField
+from airform import AirForm
+
+app = air.Air()
+
+class BookOrder(AirModel):
+    id: int | None = AirField(default=None, primary_key=True)
+    title: str = AirField(label="Book Title", min_length=1)
+    quantity: int = AirField(label="Quantity")
+
+class BookOrderForm(AirForm[BookOrder]):
+    pass
+
+@app.page
+def order_page(request: air.Request) -> air.Html:
+    return air.Html(
+        air.H1("Order a Book"),
+        air.Form(
+            air.Raw(BookOrderForm().render()),
+            air.Button("Order", type_="submit"),
+            method="post", action="/order",
+        ),
+    )
+
+@app.post("/order")
+async def submit_order(request: air.Request) -> air.Html:
+    form = await BookOrderForm.from_request(request)
+    if form.is_valid:
+        await BookOrder.create(
+            title=form.data.title,
+            quantity=form.data.quantity,
+        )
+        return air.Html(air.H1(f"Ordered: {form.data.title}"))
+    return air.Html(
+        air.H1("Please fix the errors"),
+        air.Form(
+            air.Raw(form.render()),  # re-render with errors + preserved values
+            air.Button("Order", type_="submit"),
+            method="post", action="/order",
+        ),
+    )
+```
+
+`from_request()` reads `request.form()`, validates with CSRF, and returns the populated form. Works with FastAPI's `Depends` for dependency injection.
+
 ## The validation flow
 
 ```python
@@ -59,7 +137,7 @@ form.validate({"name": "Audrey", "email": "audreyfeldroy@example.com"})
 
 After `validate()`:
 - `form.is_valid` is `True` or `False`
-- `form.data` is the validated Pydantic model instance (raises `AttributeError` if not valid)
+- `form.data` is the validated model instance (raises `AttributeError` if not valid)
 - `form.errors` is a list of Pydantic error dicts, or `None`
 - `form.submitted_data` is the raw dict that was submitted
 
@@ -92,21 +170,41 @@ CSRF is automatic. You don't configure it, you don't add fields to your model, y
 
 For multi-worker production, set `AIRFORM_SECRET` env var so all workers share the same signing key. Otherwise a per-process key is auto-generated.
 
-## Async: from_request()
+## Form models vs database models
 
-For web handlers that receive form submissions:
+When the form fields match the database model, use the AirModel directly:
 
 ```python
-@app.post("/order")
-async def submit(request):
-    form = await BookOrderForm.from_request(request)
-    if form.is_valid:
-        save_order(form.data)
-        return success_page(form.data.title)
-    return render_form_page(form.render())  # re-render with errors
+class BookOrder(AirModel):
+    id: int | None = AirField(default=None, primary_key=True)
+    title: str = AirField(label="Title")
+
+class BookOrderForm(AirForm[BookOrder]):
+    pass
 ```
 
-`from_request()` reads `request.form()` (Starlette/FastAPI), validates with CSRF, and returns the populated form. Works with FastAPI's `Depends` for dependency injection.
+When the form needs extra fields (confirm_password, terms checkbox) or different validation, define a separate form model with plain `BaseModel`:
+
+```python
+from pydantic import BaseModel
+
+class UserRegistration(BaseModel):
+    """Form model, not the database model."""
+    username: str = AirField(label="Username", min_length=3)
+    email: str = AirField(type="email", label="Email")
+    password: str = AirField(type="password", label="Password", min_length=8)
+    confirm_password: str = AirField(type="password", label="Confirm Password")
+
+class RegistrationForm(AirForm[UserRegistration]):
+    pass
+
+class User(AirModel):
+    """Database model, different fields."""
+    id: int | None = AirField(default=None, primary_key=True)
+    username: str
+    email: str
+    password_hash: str
+```
 
 ## Custom rendering
 
@@ -154,6 +252,7 @@ html = form.render()  # shows errors + preserves submitted values
 ## Architecture (for understanding, not for using)
 
 - `airfield` package defines presentation metadata types (Widget, Label, Choices, etc.) as frozen dataclasses on `field_info.metadata`
-- `airform` reads that metadata and produces HTML. It's a consumer of AirField's vocabulary.
+- `airmodel` package provides the async ORM (AirModel extends BaseModel with database operations, re-exports AirField)
+- `airform` reads AirField metadata and produces HTML. It's a consumer of AirField's vocabulary.
 - The renderer walks `model.model_fields`, builds a `{type: instance}` dict of metadata per field for O(1) lookup, and produces the appropriate HTML element
 - CSRF uses a Pydantic wrapper model created at class definition time via `create_model`. The wrapper inherits from your model and adds a `csrf_token: ValidCsrfToken` field. `ValidCsrfToken` is a custom Pydantic type that validates the HMAC signature in `__get_pydantic_core_schema__`
