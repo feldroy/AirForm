@@ -514,7 +514,7 @@ def test_custom_widget_swap() -> None:
         name: str
         role: str
 
-    def tavern_widget(*, model, data=None, errors=None, includes=None):
+    def tavern_widget(*, model, data=None, errors=None, includes=None, excludes=None):
         return "<p>Fill this out or the barkeep gets cross.</p>"
 
     class CompanionForm(AirForm[CompanionModel]):
@@ -744,3 +744,169 @@ def test_safe_html_preserves_content() -> None:
     assert '<label for="color">' in html
     # String operations work
     assert html.count("air-field") >= 1
+
+
+# ── Excludes tests (woodworking) ─────────────────────────────────────
+
+
+def test_excludes_bare_string_excludes_from_display_and_save() -> None:
+    """A bare string in excludes hides the field from rendering and from save data."""
+
+    class WorkbenchModel(BaseModel):
+        wood_type: str
+        length: int
+        created_at: str = AirField(default="2026-01-01")
+
+    class WorkbenchForm(AirForm[WorkbenchModel]):
+        excludes = ("created_at",)
+
+    # Display: created_at not rendered
+    html = WorkbenchForm().render()
+    assert "wood_type" in html
+    assert "length" in html
+    assert "created_at" not in html
+
+    # Save: created_at not in save_data
+    form = WorkbenchForm()
+    form.validate({"wood_type": "oak", "length": "72"})
+    assert form.is_valid
+    assert form.data.wood_type == "oak"
+    assert "created_at" not in form.save_data()
+
+
+def test_excludes_tuple_display_only() -> None:
+    """A ('field', 'display') tuple hides the field from rendering but keeps it in save_data."""
+
+    class WorkbenchModel(BaseModel):
+        wood_type: str
+        finish: str = AirField(default="natural")
+
+    class WorkbenchForm(AirForm[WorkbenchModel]):
+        excludes = (("finish", "display"),)
+
+    # Display: finish not rendered
+    html = WorkbenchForm().render()
+    assert "wood_type" in html
+    assert "finish" not in html
+
+    # Save: finish is in save_data (only display-excluded, not save-excluded)
+    form = WorkbenchForm()
+    form.validate({"wood_type": "walnut", "finish": "lacquer"})
+    assert form.is_valid
+    assert form.data.finish == "lacquer"
+    assert "finish" in form.save_data()
+
+
+def test_excludes_tuple_save_only() -> None:
+    """A ('field', 'save') tuple renders the field but strips it from save_data."""
+
+    class WorkbenchModel(BaseModel):
+        wood_type: str
+        internal_notes: str = AirField(default="")
+
+    class WorkbenchForm(AirForm[WorkbenchModel]):
+        excludes = (("internal_notes", "save"),)
+
+    # Display: internal_notes is rendered
+    html = WorkbenchForm().render()
+    assert "internal_notes" in html
+
+    # Save: internal_notes still on form.data but excluded from save_data
+    form = WorkbenchForm()
+    form.validate({"wood_type": "maple", "internal_notes": "check grain"})
+    assert form.is_valid
+    assert form.data.internal_notes == "check grain"
+    assert "internal_notes" not in form.save_data()
+
+
+def test_excludes_primary_key_default_display_exclude() -> None:
+    """PrimaryKey fields are default display excludes."""
+
+    class WorkbenchModel(BaseModel):
+        id: int = AirField(default=0, primary_key=True)
+        wood_type: str
+
+    class WorkbenchForm(AirForm[WorkbenchModel]):
+        pass
+
+    html = WorkbenchForm().render()
+    assert "wood_type" in html
+    assert 'name="id"' not in html
+
+
+def test_excludes_csrf_default_save_exclude() -> None:
+    """CsrfToken fields are default save excludes, not in form.data."""
+    import re
+
+    class WorkbenchModel(BaseModel):
+        wood_type: str
+
+    class WorkbenchForm(AirForm[WorkbenchModel]):
+        pass
+
+    form = WorkbenchForm()
+    html = form.render()
+
+    match = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    assert match
+    token = match.group(1)
+
+    form.validate({"wood_type": "cherry", "csrf_token": token})
+    assert form.is_valid
+    assert form.data.wood_type == "cherry"
+    assert not hasattr(form.data, "csrf_token")
+
+
+def test_excludes_user_extends_defaults() -> None:
+    """User excludes merge with metadata defaults, not replace them."""
+
+    class WorkbenchModel(BaseModel):
+        id: int = AirField(default=0, primary_key=True)
+        wood_type: str
+        created_at: str = AirField(default="2026-01-01")
+
+    class WorkbenchForm(AirForm[WorkbenchModel]):
+        excludes = ("created_at",)
+
+    html = WorkbenchForm().render()
+    # id excluded from display (PrimaryKey default)
+    assert 'name="id"' not in html
+    # created_at excluded from display (user)
+    assert "created_at" not in html
+    # wood_type rendered
+    assert "wood_type" in html
+
+
+def test_excludes_multiple_scopes_in_tuple() -> None:
+    """A tuple can list multiple scopes."""
+
+    class WorkbenchModel(BaseModel):
+        wood_type: str
+        secret_code: str = AirField(default="")
+
+    class WorkbenchForm(AirForm[WorkbenchModel]):
+        excludes = (("secret_code", "display", "save"),)
+
+    # Display: secret_code not rendered
+    html = WorkbenchForm().render()
+    assert "secret_code" not in html
+
+    # Save: secret_code not in save_data
+    form = WorkbenchForm()
+    form.validate({"wood_type": "birch"})
+    assert form.is_valid
+    assert "secret_code" not in form.save_data()
+
+
+def test_includes_and_excludes_both_set_raises() -> None:
+    """Setting both includes and excludes is an error."""
+
+    class WorkbenchModel(BaseModel):
+        wood_type: str
+        length: int
+
+    with pytest.raises(ValueError, match="includes.*excludes"):
+
+        class WorkbenchForm(AirForm[WorkbenchModel]):
+            includes = ("wood_type",)
+            excludes = ("length",)

@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from enum import Enum
 from html import escape
 from types import UnionType
-from typing import Annotated, Any, Literal, Self, Union, get_args, get_origin
+from typing import Any, Literal, Self, Union, get_args, get_origin
 
 import annotated_types
 from airfield import Autofocus, Label, Widget
@@ -25,7 +25,7 @@ from airfield.types import (
     PrimaryKey,
     ReadOnly,
 )
-from pydantic import BaseModel, ValidationError, create_model
+from pydantic import BaseModel, ValidationError
 from pydantic_core import ErrorDetails
 from starlette.requests import Request
 
@@ -191,6 +191,7 @@ def default_form_widget(
     data: dict | None = None,
     errors: list | None = None,
     includes: Sequence[str] | None = None,
+    excludes: set[str] | None = None,
 ) -> str:
     """Render form fields for a Pydantic model as HTML.
 
@@ -216,13 +217,13 @@ def default_form_widget(
     for field_name, field_info in model.model_fields.items():
         if includes is not None and field_name not in includes:
             continue
+        if excludes is not None and field_name in excludes:
+            continue
 
         meta = _meta_dict(field_info)
         annotation = field_info.annotation
 
-        # Skip primary keys and fields hidden in form context
-        if PrimaryKey in meta:
-            continue
+        # Skip fields hidden in form context
         hidden = _get_meta(meta, Hidden)
         if hidden and hidden.in_context("form"):
             continue
@@ -328,26 +329,49 @@ def default_form_widget(
 # ---------------------------------------------------------------------------
 
 
-def _build_csrf_model(model: type[BaseModel]) -> type[BaseModel]:
-    """Create a wrapper model that adds a csrf_token field.
+def _build_excludes(
+    model: type[BaseModel],
+    user_excludes: Sequence[str | tuple[str, ...]] | None,
+) -> tuple[set[str], set[str]]:
+    """Build effective display and save exclude sets.
 
-    The wrapper inherits from the user's model and adds a
-    csrf_token field validated by the ValidCsrfToken Pydantic type.
-    The CsrfToken metadata type from AirField marks it so renderers
-    know to skip it in user-facing layouts.
+    Scans model metadata for PrimaryKey (default display exclude),
+    then merges with the user's excludes tuple.
+
+    A bare string in excludes means both display and save.
+    A tuple like ("field", "display") or ("field", "save") or
+    ("field", "display", "save") targets specific scopes.
+
+    CSRF is not in the excludes system. render() pushes the token,
+    validate() pops it. It never reaches the model or form.data.
+
+    Returns:
+        (display_excludes, save_excludes) sets of field names.
     """
-    from airfield.types import CsrfToken as CsrfTokenMeta
+    display: set[str] = set()
+    save: set[str] = set()
 
-    from airform.csrf import CSRF_FIELD_NAME, ValidCsrfToken
+    # Metadata defaults
+    for name, field_info in model.model_fields.items():
+        meta = _meta_dict(field_info)
+        if PrimaryKey in meta:
+            display.add(name)
 
-    # Annotated type with AirField CsrfToken metadata
-    csrf_annotation = Annotated[ValidCsrfToken, CsrfTokenMeta()]
+    # User-provided excludes
+    if user_excludes is not None:
+        for entry in user_excludes:
+            if isinstance(entry, str):
+                display.add(entry)
+                save.add(entry)
+            else:
+                field_name = entry[0]
+                scopes = entry[1:]
+                if "display" in scopes:
+                    display.add(field_name)
+                if "save" in scopes:
+                    save.add(field_name)
 
-    return create_model(  # type: ignore[call-overload]
-        f"_{model.__name__}WithCsrf",
-        __base__=model,
-        **{CSRF_FIELD_NAME: (csrf_annotation, ...)},
-    )
+    return display, save
 
 
 class AirForm[M: BaseModel]:
@@ -356,44 +380,45 @@ class AirForm[M: BaseModel]:
     Daniel's original pattern: the form knows its model, validates
     from a dict, and renders itself through a swappable widget.
 
-    CSRF protection is automatic. When render() is called, a signed
-    token is embedded as a hidden field. When validate() runs after
-    render(), Pydantic validates the token alongside all other fields
-    using a wrapper model. If validate() is called directly without
-    render() (programmatic use, tests), CSRF is skipped.
+    CSRF protection is automatic. render() embeds a signed token
+    as a hidden input. validate() pops and checks the token before
+    Pydantic sees the data. If validate() is called directly
+    without render() (programmatic use, tests), CSRF is skipped.
 
     Example::
 
         from pydantic import BaseModel
         from airform import AirForm
 
-        class CheeseModel(BaseModel):
-            name: str
-            age: int
+        class WatercolorModel(BaseModel):
+            pigment: str
+            opacity: int
 
-        class CheeseForm(AirForm[CheeseModel]):
+        class WatercolorForm(AirForm[WatercolorModel]):
             pass
 
-        form = CheeseForm()
-        form.validate({"name": "Parmesan", "age": 24})
+        form = WatercolorForm()
+        form.validate({"pigment": "burnt sienna", "opacity": 80})
         if form.is_valid:
-            print(form.data.name)
+            print(form.data.pigment)
 
         # Render a blank form (includes CSRF token automatically)
-        html = CheeseForm().render()
+        html = WatercolorForm().render()
 
         # Swap the widget for custom rendering
-        class CustomCheeseForm(AirForm[CheeseModel]):
+        class CustomWatercolorForm(AirForm[WatercolorModel]):
             widget = my_custom_renderer
     """
 
     model: type[M] | None = None
-    _csrf_model: type[BaseModel] | None = None
     _data: M | None = None
     initial_data: dict | None = None
     errors: list[ErrorDetails] | None = None
     is_valid: bool = False
     includes: Sequence[str] | None = None
+    excludes: Sequence[str | tuple[str, ...]] | None = None
+    _display_excludes: set[str] = set()
+    _save_excludes: set[str] = set()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -404,9 +429,17 @@ class AirForm[M: BaseModel]:
                     if args and isinstance(args[0], type) and issubclass(args[0], BaseModel):
                         cls.model = args[0]
                         break
-        # Build the CSRF wrapper model once at class definition time
+
+        # includes and excludes are mutually exclusive
+        has_includes = cls.__dict__.get("includes") is not None
+        has_excludes = cls.__dict__.get("excludes") is not None
+        if has_includes and has_excludes:
+            msg = f"Cannot set both includes and excludes on {cls.__name__}"
+            raise ValueError(msg)
+
+        # Build effective exclude sets from metadata defaults + user tuple
         if cls.model is not None:
-            cls._csrf_model = _build_csrf_model(cls.model)
+            cls._display_excludes, cls._save_excludes = _build_excludes(cls.model, cls.excludes)
 
     def __init__(self, initial_data: dict | None = None) -> None:
         if self.model is None:
@@ -454,43 +487,55 @@ class AirForm[M: BaseModel]:
     def validate(self, form_data: Mapping[str, Any]) -> bool:
         """Validate form data against the model.
 
-        If render() was called first, Pydantic validates the CSRF
-        token as a regular field on a wrapper model. If validate()
-        is called directly (programmatic use, tests), CSRF is
-        skipped and the original model is used.
+        If render() or from_request() set a CSRF expectation, the
+        token is popped and checked before Pydantic sees the data.
+        Fields in _save_excludes are excluded from form.data.
 
         Args:
-            form_data: Dictionary containing the form fields to validate.
+            form_data: Mapping containing the form fields to validate.
 
         Returns:
             True if validation succeeds, False otherwise.
         """
+        from airform.csrf import CSRF_FIELD_NAME, _check_csrf_token
 
         self._data = None
         self.is_valid = False
         self.errors = None
         self.submitted_data = dict(form_data) if hasattr(form_data, "items") else form_data
 
-        # Use the CSRF wrapper model if render() was called, otherwise the plain model
-        if self._csrf_token is not None and self._csrf_model is not None:
-            validation_model = self._csrf_model
-        else:
-            validation_model = self.model
+        # Pop and check CSRF token before Pydantic sees it
+        if self._csrf_token is not None:
+            raw_token = self.submitted_data.pop(CSRF_FIELD_NAME, None)
+            try:
+                if raw_token is None:
+                    msg = "CSRF token is missing."
+                    raise ValueError(msg)
+                _check_csrf_token(raw_token)
+            except ValueError as e:
+                self.errors = [{"type": "value_error", "loc": (CSRF_FIELD_NAME,), "msg": str(e), "input": raw_token}]
+                return self.is_valid
 
+        # Validate against the user's model
         try:
-            assert validation_model is not None
-            result = validation_model(**self.submitted_data)
-            # If we used the wrapper, extract the original model's data
-            if validation_model is not self.model:
-                assert self.model is not None
-                original_fields = {k: getattr(result, k) for k in self.model.model_fields}
-                self._data = self.model.model_construct(**original_fields)
-            else:
-                self._data = result  # type: ignore[assignment]
+            assert self.model is not None
+            self._data = self.model(**self.submitted_data)
             self.is_valid = True
         except ValidationError as e:
             self.errors = e.errors()
         return self.is_valid
+
+    def save_data(self) -> dict[str, Any]:
+        """Return validated data as a dict, excluding save-excluded fields.
+
+        Use this when persisting to a database::
+
+            await MyModel.create(**form.save_data())
+        """
+        if self._data is None:
+            msg = "No validated data available. Check is_valid before calling save_data()."
+            raise AttributeError(msg)
+        return self._data.model_dump(exclude=self._save_excludes or None)
 
     #: Widget for rendering the form as HTML. A callable with signature
     #: ``(*, model, data, errors, includes) -> str``.
@@ -516,5 +561,6 @@ class AirForm[M: BaseModel]:
             data=render_data,
             errors=self.errors,
             includes=self.includes,
+            excludes=self._display_excludes or None,
         )
         return SafeHTML(f"{csrf_html}\n{fields_html}")
