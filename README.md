@@ -19,6 +19,9 @@ Pydantic-native form validation and rendering for [Air](https://airwebframework.
 * Accessible by default: aria-invalid, aria-describedby, role="alert" on errors
 * Textarea, select, and checkbox rendering from type annotations and metadata
 * Zero-config CSRF protection: render() embeds a signed token, validate() checks it
+* Scoped excludes: hide fields from display, saving, or both
+* `save_data()` returns a dict ready for `await MyModel.create()`
+* `default_css()` built-in stylesheet for polished forms without a CSS framework
 * Swappable widget for custom renderers
 * `from_request()` for async ASGI request handling (works with FastAPI Depends)
 
@@ -46,7 +49,7 @@ def order_page(request: air.Request):
     return air.Html(
         air.H1("Order a Book"),
         air.Form(
-            air.Raw(BookOrderForm().render()),
+            BookOrderForm().render(),
             air.Button("Order", type_="submit"),
             method="post", action="/order",
         ),
@@ -56,14 +59,11 @@ def order_page(request: air.Request):
 async def submit_order(request: air.Request):
     form = await BookOrderForm.from_request(request)
     if form.is_valid:
-        await BookOrder.create(
-            title=form.data.title,
-            quantity=form.data.quantity,
-        )
+        await BookOrder.create(**form.save_data())
         return air.Html(air.H1(f"Ordered: {form.data.title}"))
     return air.Html(
         air.Form(
-            air.Raw(form.render()),
+            form.render(),
             air.Button("Order", type_="submit"),
             method="post", action="/order",
         ),

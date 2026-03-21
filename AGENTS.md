@@ -25,11 +25,7 @@ class BookOrderForm(AirForm[BookOrder]):
 form = BookOrderForm()
 form.validate({"title": "Everyone Dies", "quantity": "3"})
 if form.is_valid:
-    await BookOrder.create(
-        title=form.data.title,
-        quantity=form.data.quantity,
-        gift_wrap=form.data.gift_wrap,
-    )
+    await BookOrder.create(**form.save_data())
 
 # Render a blank form
 html = BookOrderForm().render()
@@ -101,7 +97,7 @@ def order_page(request: air.Request) -> air.Html:
     return air.Html(
         air.H1("Order a Book"),
         air.Form(
-            air.Raw(BookOrderForm().render()),
+            BookOrderForm().render(),
             air.Button("Order", type_="submit"),
             method="post", action="/order",
         ),
@@ -111,15 +107,12 @@ def order_page(request: air.Request) -> air.Html:
 async def submit_order(request: air.Request) -> air.Html:
     form = await BookOrderForm.from_request(request)
     if form.is_valid:
-        await BookOrder.create(
-            title=form.data.title,
-            quantity=form.data.quantity,
-        )
+        await BookOrder.create(**form.save_data())
         return air.Html(air.H1(f"Ordered: {form.data.title}"))
     return air.Html(
         air.H1("Please fix the errors"),
         air.Form(
-            air.Raw(form.render()),  # re-render with errors + preserved values
+            form.render(),  # re-render with errors + preserved values
             air.Button("Order", type_="submit"),
             method="post", action="/order",
         ),
@@ -163,7 +156,7 @@ If `validate()` was called before `render()`, submitted values and errors are pr
 CSRF is automatic. You don't configure it, you don't add fields to your model, you don't think about it.
 
 - `render()` embeds a signed token as a hidden input
-- `validate()` after `render()` checks the token through Pydantic's validation (it uses a wrapper model internally)
+- `validate()` after `render()` pops the token and checks the HMAC before Pydantic runs
 - `validate()` without a prior `render()` skips CSRF (this is for programmatic use and tests)
 - `from_request()` always enforces CSRF (browser submissions come from rendered forms)
 - `form.data` never has a `csrf_token` attribute; it's stripped before you see it
@@ -229,6 +222,21 @@ class ShippingForm(AirForm[Order]):
     excludes = ("internal_notes", "created_at")
 ```
 
+**Scoped excludes (display only, save only):**
+```python
+class ArticleForm(AirForm[Article]):
+    excludes = (
+        ("slug", "display"),        # not in form, still in save_data()
+        ("internal_notes", "save"),  # in form, excluded from save_data()
+    )
+```
+
+**Save to database:**
+```python
+if form.is_valid:
+    await MyModel.create(**form.save_data())
+```
+
 **Pre-populated edit form:**
 ```python
 form = BookOrderForm({"title": "Existing Book", "quantity": 2})
@@ -264,9 +272,9 @@ class BookOrder(AirModel):
 class BookOrderForm(AirForm[BookOrder]):
     pass
 
-# Template: air.Raw(BookOrderForm().render())
+# Template: BookOrderForm().render()
 # Handler: form = await BookOrderForm.from_request(request)
-# Save:    await BookOrder.create(**form.data.model_dump(exclude={"id"}))
+# Save:    await BookOrder.create(**form.save_data())
 ```
 
 ## Architecture (for understanding, not for using)
@@ -275,4 +283,4 @@ class BookOrderForm(AirForm[BookOrder]):
 - `airmodel` package provides the async ORM (AirModel extends BaseModel with database operations, re-exports AirField)
 - `airform` reads AirField metadata and produces HTML. It's a consumer of AirField's vocabulary.
 - The renderer walks `model.model_fields`, builds a `{type: instance}` dict of metadata per field for O(1) lookup, and produces the appropriate HTML element
-- CSRF uses a Pydantic wrapper model created at class definition time via `create_model`. The wrapper inherits from your model and adds a `csrf_token: ValidCsrfToken` field. `ValidCsrfToken` is a custom Pydantic type that validates the HMAC signature in `__get_pydantic_core_schema__`
+- CSRF is a pre-check in `validate()`: pop the token from submitted data, verify the HMAC signature, fail fast if invalid. Then validate against the user's real model with all their validators. No wrapper model, no special Pydantic types in the validation path.

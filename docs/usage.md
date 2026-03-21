@@ -46,10 +46,7 @@ form.validate({"title": "Everyone Dies", "quantity": "3"})
 
 if form.is_valid:
     print(form.data.title)   # "Everyone Dies" — typed as str
-    await BookOrder.create(
-        title=form.data.title,
-        quantity=form.data.quantity,
-    )
+    await BookOrder.create(**form.save_data())
 ```
 
 After `validate()`:
@@ -78,14 +75,11 @@ In an Air web handler:
 async def submit_order(request: air.Request):
     form = await BookOrderForm.from_request(request)
     if form.is_valid:
-        await BookOrder.create(
-            title=form.data.title,
-            quantity=form.data.quantity,
-        )
+        await BookOrder.create(**form.save_data())
         return air.Html(air.H1(f"Ordered: {form.data.title}"))
     return air.Html(
         air.Form(
-            air.Raw(form.render()),
+            form.render(),
             air.Button("Order", type_="submit"),
             method="post", action="/order",
         ),
@@ -101,7 +95,7 @@ from fastapi import Depends
 @app.post("/order")
 async def submit(form: Annotated[BookOrderForm, Depends(BookOrderForm.from_request)]):
     if form.is_valid:
-        await BookOrder.create(title=form.data.title, quantity=form.data.quantity)
+        await BookOrder.create(**form.save_data())
 ```
 
 ## Re-render with errors
@@ -116,6 +110,44 @@ html = form.render()  # inputs keep their values, errors shown per field
 
 Errors appear as `<div class="air-field-message" role="alert">` with `aria-invalid="true"` on the input.
 
+## Excludes
+
+Forms start with all fields and use `excludes` to hide what shouldn't appear. A bare string excludes from both rendering and `save_data()`. A tuple targets a specific scope:
+
+```python
+class ArticleForm(AirForm[Article]):
+    excludes = (
+        "created_at",              # hidden from display AND save_data()
+        ("slug", "display"),       # hidden from form, still in save_data()
+        ("internal_notes", "save"),  # rendered in form, excluded from save_data()
+    )
+```
+
+PrimaryKey fields are display-excluded by default.
+
+## save_data()
+
+Returns validated data as a dict, excluding save-excluded fields:
+
+```python
+if form.is_valid:
+    await Article.create(**form.save_data())
+```
+
+## Default stylesheet
+
+AirForm ships CSS that styles every element it renders. Load it with:
+
+```python
+from airform import default_css
+
+# In a Jinja2 template:
+# <style>{{ default_css() }}</style>
+
+# In Air tags:
+# air.Style(default_css())
+```
+
 ## CSRF protection
 
 CSRF is automatic. `render()` embeds a signed hidden token. `validate()` after `render()` checks it. `from_request()` always enforces it. You don't configure anything.
@@ -127,7 +159,7 @@ For multi-worker production, set the `AIRFORM_SECRET` environment variable so al
 Swap the renderer by setting `widget` on your form subclass:
 
 ```python
-def my_renderer(*, model, data=None, errors=None, includes=None):
+def my_renderer(*, model, data=None, errors=None, excludes=None):
     # Return an HTML string
     ...
 
