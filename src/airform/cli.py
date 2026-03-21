@@ -11,10 +11,26 @@ import typer
 from rich.console import Console
 from rich.syntax import Syntax
 
+import airform
 from airform import default_form_widget
 
-app = typer.Typer()
+app = typer.Typer(add_completion=False)
 console = Console()
+
+
+def _version_callback(value: bool) -> None:  # noqa: FBT001
+    if value:
+        typer.echo(f"AirForm {airform.__version__}")
+        raise typer.Exit
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False, "--version", "-v", help="Show version and exit.", callback=_version_callback, is_eager=True
+    ),
+) -> None:
+    """AirForm: Pydantic-native form validation and rendering."""
 
 
 @app.command()

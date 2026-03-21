@@ -2,6 +2,8 @@
 
 Pro-tip: Always validate incoming data."""
 
+from importlib.metadata import version
+
 from airform.forms import (
     AirForm,
     default_form_widget,
@@ -10,6 +12,8 @@ from airform.forms import (
     label_for_field,
     pydantic_type_to_html_type,
 )
+
+__version__ = version("airform")
 
 __all__ = [
     "AirForm",
