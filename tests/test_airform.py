@@ -384,7 +384,7 @@ def test_render_airfield_choices() -> None:
     assert "<select" in html
     assert '<option value="tank">The One Who Gets Hit</option>' in html
     assert '<option value="bard">The One With Snacks</option>' in html
-    assert '<option value="">-- Select --</option>' in html
+    assert "Select...</option>" in html
 
 
 def test_render_airfield_choices_with_selected() -> None:

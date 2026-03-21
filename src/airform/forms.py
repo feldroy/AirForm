@@ -285,7 +285,7 @@ def default_form_widget(
         elif input_type == "select":
             options = _get_options(annotation, meta)
             parts.append(f"  <select{_attr_str(input_attrs)}>")
-            parts.append('    <option value="">-- Select --</option>')
+            parts.append('    <option value="" disabled selected hidden>Select...</option>')
             for opt_val, opt_label in options:
                 sel = " selected" if value is not None and str(value) == opt_val else ""
                 parts.append(f'    <option value="{escape(opt_val)}"{sel}>{escape(opt_label)}</option>')
