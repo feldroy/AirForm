@@ -6,6 +6,7 @@ from importlib.metadata import version
 
 from airform.forms import (
     AirForm,
+    SafeHTML,
     default_form_widget,
     errors_to_dict,
     get_user_error_message,
@@ -17,6 +18,7 @@ __version__ = version("airform")
 
 __all__ = [
     "AirForm",
+    "SafeHTML",
     "default_form_widget",
     "errors_to_dict",
     "get_user_error_message",

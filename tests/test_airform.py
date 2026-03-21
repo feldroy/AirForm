@@ -707,3 +707,39 @@ def test_csrf_token_excluded_from_field_rendering() -> None:
     # User fields are rendered normally
     assert "Band Width" in html
     assert "Stone Type" in html
+
+
+# ── SafeHTML / __html__ protocol tests ───────────────────────────────
+
+
+def test_render_returns_safe_html() -> None:
+    """render() returns a SafeHTML instance, not a plain str."""
+    from airform import SafeHTML
+
+    class GlazeModel(BaseModel):
+        color: str
+
+    class GlazeForm(AirForm[GlazeModel]):
+        pass
+
+    result = GlazeForm().render()
+    assert isinstance(result, SafeHTML)
+    assert isinstance(result, str)
+    assert hasattr(result, "__html__")
+
+
+def test_safe_html_preserves_content() -> None:
+    """SafeHTML behaves like a str for all practical purposes."""
+    from airform import SafeHTML
+
+    class GlazeModel(BaseModel):
+        color: str = AirField(label="Glaze Color")
+
+    class GlazeForm(AirForm[GlazeModel]):
+        pass
+
+    html = GlazeForm().render()
+    assert "Glaze Color" in html
+    assert '<label for="color">' in html
+    # String operations work
+    assert html.count("air-field") >= 1

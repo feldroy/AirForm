@@ -30,6 +30,23 @@ from pydantic_core import ErrorDetails
 from starlette.requests import Request
 
 # ---------------------------------------------------------------------------
+# Safe HTML output
+# ---------------------------------------------------------------------------
+
+
+class SafeHTML(str):
+    """A str subclass that HTML-aware systems can trust without escaping.
+
+    Follows the __html__ protocol used by Jinja2 and MarkupSafe.
+    Air's tag system checks for __html__ and skips escaping, so
+    form.render() output can be passed directly to Air tags without
+    air.Raw() wrapping.
+    """
+
+    __html__ = True
+
+
+# ---------------------------------------------------------------------------
 # Metadata helpers
 # ---------------------------------------------------------------------------
 
@@ -493,4 +510,4 @@ class AirForm[M: BaseModel]:
             errors=self.errors,
             includes=self.includes,
         )
-        return f"{csrf_html}\n{fields_html}"
+        return SafeHTML(f"{csrf_html}\n{fields_html}")
