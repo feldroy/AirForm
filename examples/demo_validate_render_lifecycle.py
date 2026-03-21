@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["airform", "airfield"]
+# dependencies = ["airform>=0.4.0", "airfield>=0.5.0"]
 # ///
 """Pottery workshop registration form built from AGENTS.md documentation alone."""
 
