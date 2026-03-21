@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "AirForm"
-version = "0.3.0"
+version = "0.3.1"
 description = "Pydantic-native form validation and rendering. Define a model, get a validated, rendered HTML form. Works with or without Air web framework."
 readme = "README.md"
 authors = [
