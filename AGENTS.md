@@ -211,7 +211,7 @@ class User(AirModel):
 Swap the entire renderer by setting `widget` on your form class:
 
 ```python
-def my_renderer(*, model, data=None, errors=None, includes=None):
+def my_renderer(*, model, data=None, errors=None, excludes=None):
     # Build HTML however you want
     return "<div>my custom form</div>"
 
@@ -219,14 +219,14 @@ class BookOrderForm(AirForm[BookOrder]):
     widget = staticmethod(my_renderer)
 ```
 
-The widget receives the model class, pre-populated data, validation errors, and an optional field filter. It returns an HTML string. The CSRF hidden input is added by `render()` outside the widget, so custom widgets get CSRF protection for free.
+The widget receives the model class, pre-populated data, validation errors, and an optional excludes set. It returns an HTML string. The CSRF hidden input is added by `render()` outside the widget, so custom widgets get CSRF protection for free.
 
 ## Common patterns
 
-**Subset of fields:**
+**Hide fields from the form:**
 ```python
 class ShippingForm(AirForm[Order]):
-    includes = ("address", "city", "zip_code")
+    excludes = ("internal_notes", "created_at")
 ```
 
 **Pre-populated edit form:**

@@ -307,21 +307,6 @@ def test_render_with_errors_shows_messages() -> None:
     assert "This field is required." in html
 
 
-def test_render_with_includes() -> None:
-    class PlaneModel(BaseModel):
-        id: int
-        name: str
-        max_airspeed: str
-
-    class PlaneForm(AirForm[PlaneModel]):
-        includes = ("name", "max_airspeed")
-
-    html = PlaneForm().render()
-    assert 'name="name"' in html
-    assert 'name="max_airspeed"' in html
-    assert 'name="id"' not in html
-
-
 def test_render_airfield_label() -> None:
     """Labels from AirField metadata appear in rendered HTML."""
 
@@ -514,7 +499,7 @@ def test_custom_widget_swap() -> None:
         name: str
         role: str
 
-    def tavern_widget(*, model, data=None, errors=None, includes=None, excludes=None):
+    def tavern_widget(*, model, data=None, errors=None, excludes=None):
         return "<p>Fill this out or the barkeep gets cross.</p>"
 
     class CompanionForm(AirForm[CompanionModel]):
@@ -896,17 +881,3 @@ def test_excludes_multiple_scopes_in_tuple() -> None:
     form.validate({"wood_type": "birch"})
     assert form.is_valid
     assert "secret_code" not in form.save_data()
-
-
-def test_includes_and_excludes_both_set_raises() -> None:
-    """Setting both includes and excludes is an error."""
-
-    class WorkbenchModel(BaseModel):
-        wood_type: str
-        length: int
-
-    with pytest.raises(ValueError, match="includes.*excludes"):
-
-        class WorkbenchForm(AirForm[WorkbenchModel]):
-            includes = ("wood_type",)
-            excludes = ("length",)

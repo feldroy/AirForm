@@ -190,7 +190,6 @@ def default_form_widget(
     model: type[BaseModel],
     data: dict | None = None,
     errors: list | None = None,
-    includes: Sequence[str] | None = None,
     excludes: set[str] | None = None,
 ) -> str:
     """Render form fields for a Pydantic model as HTML.
@@ -206,7 +205,7 @@ def default_form_widget(
         model: The Pydantic model class to render.
         data: Dictionary of data to pre-populate fields.
         errors: List of Pydantic validation errors.
-        includes: Only render these field names (None means all).
+        excludes: Field names to skip when rendering.
 
     Returns:
         HTML string with all form fields.
@@ -215,8 +214,6 @@ def default_form_widget(
     field_parts: list[str] = []
 
     for field_name, field_info in model.model_fields.items():
-        if includes is not None and field_name not in includes:
-            continue
         if excludes is not None and field_name in excludes:
             continue
 
@@ -415,7 +412,6 @@ class AirForm[M: BaseModel]:
     initial_data: dict | None = None
     errors: list[ErrorDetails] | None = None
     is_valid: bool = False
-    includes: Sequence[str] | None = None
     excludes: Sequence[str | tuple[str, ...]] | None = None
     _display_excludes: set[str] = set()
     _save_excludes: set[str] = set()
@@ -429,13 +425,6 @@ class AirForm[M: BaseModel]:
                     if args and isinstance(args[0], type) and issubclass(args[0], BaseModel):
                         cls.model = args[0]
                         break
-
-        # includes and excludes are mutually exclusive
-        has_includes = cls.__dict__.get("includes") is not None
-        has_excludes = cls.__dict__.get("excludes") is not None
-        if has_includes and has_excludes:
-            msg = f"Cannot set both includes and excludes on {cls.__name__}"
-            raise ValueError(msg)
 
         # Build effective exclude sets from metadata defaults + user tuple
         if cls.model is not None:
@@ -538,7 +527,7 @@ class AirForm[M: BaseModel]:
         return self._data.model_dump(exclude=self._save_excludes or None)
 
     #: Widget for rendering the form as HTML. A callable with signature
-    #: ``(*, model, data, errors, includes) -> str``.
+    #: ``(*, model, data, errors, excludes) -> str``.
     #: Override on your subclass to swap in a custom renderer::
     #:
     #:     class MyForm(AirForm[MyModel]):
@@ -560,7 +549,6 @@ class AirForm[M: BaseModel]:
             model=self.model,
             data=render_data,
             errors=self.errors,
-            includes=self.includes,
             excludes=self._display_excludes or None,
         )
         return SafeHTML(f"{csrf_html}\n{fields_html}")
